@@ -8,6 +8,7 @@ REPO_SLUG="${OPENCODE_REMOTE_REPO_SLUG:-badfun/opencode-remote}"
 REPO_REF="${OPENCODE_REMOTE_REPO_REF:-main}"
 
 is_stdin_install() {
+  [[ "${BASH_SOURCE[0]:-}" == "bash" ]] && return 0
   [[ -z "${BASH_SOURCE[0]:-}" ]] && return 0
   case "${BASH_SOURCE[0]}" in /dev/stdin|/dev/fd/*) return 0 ;; esac
   return 1

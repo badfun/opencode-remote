@@ -8,14 +8,9 @@ REPO_SLUG="${OPENCODE_REMOTE_REPO_SLUG:-badfun/opencode-remote}"
 REPO_REF="${OPENCODE_REMOTE_REPO_REF:-main}"
 
 is_stdin_install() {
-  case "${BASH_SOURCE[0]:-}" in
-    /dev/stdin|/dev/fd/*)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
+  [[ -z "${BASH_SOURCE[0]:-}" ]] && return 0
+  case "${BASH_SOURCE[0]}" in /dev/stdin|/dev/fd/*) return 0 ;; esac
+  return 1
 }
 
 ensure_path_in_shell_config() {
@@ -73,12 +68,12 @@ mkdir -p "$BIN_DIR" "$CONFIG_DIR"
 
 if is_stdin_install; then
   REMOTE_BASE="https://raw.githubusercontent.com/${REPO_SLUG}/${REPO_REF}"
-  curl -fsSL "${REMOTE_BASE}/bin/opencode-remote" -o "$TARGET"
+  curl -fsSL "${REMOTE_BASE}/bin/opencode-remote" -o "$TARGET" || exit 1
   chmod +x "$TARGET"
   write_env_template
   printf 'Installed %s from %s\n' "$TARGET" "$REMOTE_BASE"
 else
-  ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
   ln -sfn "$ROOT_DIR/bin/opencode-remote" "$TARGET"
   chmod +x "$ROOT_DIR/bin/opencode-remote"
   if [[ ! -f "$CONFIG_DIR/env" ]]; then

@@ -31,6 +31,9 @@ The installer creates:
 - `~/.local/bin/opencode-remote` (symlink to `bin/opencode-remote`)
 - `~/.config/opencode-remote/env` (from template, if missing)
 
+The installer also adds `~/.local/bin` to your shell config if it is not already on PATH.
+You may need to restart your shell or run `source ~/.bashrc` (or `source ~/.zshrc`) first.
+
 ## Configure
 
 Edit `~/.config/opencode-remote/env` and set:

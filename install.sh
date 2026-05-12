@@ -18,6 +18,34 @@ is_stdin_install() {
   esac
 }
 
+ensure_path_in_shell_config() {
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) return 0 ;;
+  esac
+
+  local rc_files=()
+  if [[ -n "${ZSH_VERSION:-}" ]]; then
+    rc_files=("$HOME/.zshrc")
+  elif [[ -n "${BASH_VERSION:-}" ]]; then
+    rc_files=("$HOME/.bashrc")
+  else
+    rc_files=("$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile")
+  fi
+
+  for rc in "${rc_files[@]}"; do
+    if [[ -f "$rc" ]]; then
+      printf '\n# added by opencode-remote install.sh\n' >> "$rc"
+      printf 'export PATH="%s:$PATH"\n' "$BIN_DIR" >> "$rc"
+      printf 'Added %s to PATH in %s\n' "$BIN_DIR" "$rc"
+      printf 'Restart your shell or run: source %s\n' "$rc"
+      return 0
+    fi
+  done
+
+  printf 'Warning: %s is not on PATH and no shell config was found.\n' "$BIN_DIR"
+  printf 'Add this line to your shell config:\n  export PATH="%s:$PATH"\n' "$BIN_DIR"
+}
+
 write_env_template() {
   if [[ ! -f "$CONFIG_DIR/env" ]]; then
     cat >"$CONFIG_DIR/env" <<'EOF'
@@ -60,5 +88,7 @@ else
   fi
   printf 'Installed %s -> %s\n' "$TARGET" "$ROOT_DIR/bin/opencode-remote"
 fi
+
+ensure_path_in_shell_config
 
 printf 'Run: opencode-remote --help\n'

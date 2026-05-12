@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  opencode-remote server      Start OpenCode server for the current directory
+  opencode-remote attach      Attach local TUI to the running OpenCode server
+  opencode-remote stop-server Stop the configured OpenCode server
+  opencode-remote stop-all    Stop OpenCode server and OpenChamber
+  opencode-remote ui          Start OpenChamber daemon
+  opencode-remote all         Start OpenChamber daemon, then start OpenCode server
+  opencode-remote ui-fg       Start OpenChamber in foreground
+  opencode-remote stop-ui     Stop OpenChamber
+  opencode-remote status      Show OpenChamber status
+
+Examples:
+  cd ~/projects/badfun/my-project
+  opencode-remote all
+  opencode-remote attach
+  opencode-remote stop-all
+EOF
+}
+
+OPENCODE_REMOTE_ENV_FILE="${OPENCODE_REMOTE_ENV_FILE:-$HOME/.config/opencode-remote/env}"
+WATCHER_ENV_FILE="${WATCHER_ENV_FILE:-$HOME/.config/opencode-watcher/env}"
+OPENCHAMBER_ENV_FILE="${OPENCHAMBER_ENV_FILE:-$HOME/.config/openchamber/env}"
+
+load_file_env() {
+  local file="$1"
+  if [[ -f "$file" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$file"
+    set +a
+  fi
+}
+
+load_env() {
+  load_file_env "$OPENCODE_REMOTE_ENV_FILE"
+  load_file_env "$WATCHER_ENV_FILE"
+  load_file_env "$OPENCHAMBER_ENV_FILE"
+
+  RAW_OPENCODE_URL="${OPENCODE_HOST:-${OPENCODE_URL:-http://127.0.0.1:4096}}"
+  OPENCODE_BASE_URL="${RAW_OPENCODE_URL%/}"
+  OPENCODE_SERVER_HOSTNAME="$(node -p 'new URL(process.argv[1]).hostname' "$RAW_OPENCODE_URL")"
+  OPENCODE_SERVER_PORT="$(node -p 'const u = new URL(process.argv[1]); u.port || (u.protocol === "https:" ? "443" : "80")' "$RAW_OPENCODE_URL")"
+  OPENCHAMBER_PORT="${OPENCHAMBER_PORT:-3000}"
+  OPENCHAMBER_HOST="${OPENCHAMBER_HOST:-0.0.0.0}"
+  OPENCHAMBER_HEALTH_URL="http://127.0.0.1:${OPENCHAMBER_PORT}/health"
+}
+
+require_server_password() {
+  if [[ -z "${OPENCODE_SERVER_PASSWORD:-}" ]]; then
+    printf 'Missing OPENCODE_SERVER_PASSWORD\n' >&2
+    exit 1
+  fi
+}
+
+require_ui_password() {
+  if [[ -z "${OPENCHAMBER_UI_PASSWORD:-}" ]]; then
+    printf 'Missing OPENCHAMBER_UI_PASSWORD\n' >&2
+    exit 1
+  fi
+}
+
+start_server() {
+  require_server_password
+  if curl -fsS -u "opencode:${OPENCODE_SERVER_PASSWORD}" "${OPENCODE_BASE_URL}/config" >/dev/null 2>&1; then
+    printf 'OpenCode server already running at %s\n' "$OPENCODE_BASE_URL"
+    return 0
+  fi
+
+  exec env \
+    OPENCODE_SERVER_PASSWORD="$OPENCODE_SERVER_PASSWORD" \
+    opencode serve --hostname "$OPENCODE_SERVER_HOSTNAME" --port "$OPENCODE_SERVER_PORT"
+}
+
+start_ui_daemon() {
+  require_server_password
+  require_ui_password
+
+  exec env \
+    OPENCODE_HOST="$OPENCODE_BASE_URL" \
+    OPENCODE_SKIP_START='true' \
+    OPENCODE_SERVER_PASSWORD="$OPENCODE_SERVER_PASSWORD" \
+    OPENCHAMBER_UI_PASSWORD="$OPENCHAMBER_UI_PASSWORD" \
+    openchamber --host "$OPENCHAMBER_HOST" --port "$OPENCHAMBER_PORT"
+}
+
+launch_ui_daemon() {
+  require_server_password
+  require_ui_password
+
+  env \
+    OPENCODE_HOST="$OPENCODE_BASE_URL" \
+    OPENCODE_SKIP_START='true' \
+    OPENCODE_SERVER_PASSWORD="$OPENCODE_SERVER_PASSWORD" \
+    OPENCHAMBER_UI_PASSWORD="$OPENCHAMBER_UI_PASSWORD" \
+    openchamber --host "$OPENCHAMBER_HOST" --port "$OPENCHAMBER_PORT"
+}
+
+start_ui_foreground() {
+  require_server_password
+  require_ui_password
+
+  exec env \
+    OPENCODE_HOST="$OPENCODE_BASE_URL" \
+    OPENCODE_SKIP_START='true' \
+    OPENCODE_SERVER_PASSWORD="$OPENCODE_SERVER_PASSWORD" \
+    OPENCHAMBER_UI_PASSWORD="$OPENCHAMBER_UI_PASSWORD" \
+    openchamber --host "$OPENCHAMBER_HOST" --port "$OPENCHAMBER_PORT" --foreground
+}
+
+stop_server() {
+  PORT="$OPENCODE_SERVER_PORT"
+  if command -v lsof >/dev/null 2>&1; then
+    PIDS="$(lsof -ti :"$PORT" || true)"
+    if [[ -n "$PIDS" ]]; then
+      kill $PIDS
+      printf 'Stopped OpenCode server on port %s\n' "$PORT"
+    else
+      printf 'No OpenCode server found on port %s\n' "$PORT"
+    fi
+  else
+    pkill -f "opencode serve --hostname .* --port ${PORT}" || true
+  fi
+}
+
+stop_ui() {
+  openchamber stop --port "$OPENCHAMBER_PORT" || true
+}
+
+load_env
+
+case "${1:-}" in
+  server)
+    start_server
+    ;;
+  attach)
+    require_server_password
+    exec opencode attach "$RAW_OPENCODE_URL" -p "$OPENCODE_SERVER_PASSWORD"
+    ;;
+  stop-server)
+    stop_server
+    ;;
+  stop-all)
+    stop_server || true
+    stop_ui || true
+    ;;
+  ui)
+    start_ui_daemon
+    ;;
+  all)
+    require_server_password
+    require_ui_password
+    if ! curl -fsS "$OPENCHAMBER_HEALTH_URL" >/dev/null 2>&1; then
+      launch_ui_daemon
+      for _ in {1..20}; do
+        if curl -fsS "$OPENCHAMBER_HEALTH_URL" >/dev/null 2>&1; then
+          break
+        fi
+        sleep 0.5
+      done
+    fi
+    start_server
+    ;;
+  ui-fg)
+    start_ui_foreground
+    ;;
+  stop-ui)
+    stop_ui
+    ;;
+  status)
+    exec openchamber status
+    ;;
+  ""|-h|--help|help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 1
+    ;;
+esac

@@ -12,6 +12,14 @@ It is useful when you want to start coding on one machine and then attach from a
 
 ## Install
 
+Quick install (no clone):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/badfun/opencode-remote/main/install.sh | bash
+```
+
+Install from a local clone:
+
 ```bash
 git clone <your-repo-url>
 cd opencode-remote
